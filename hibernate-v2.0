@@ -1,0 +1,80 @@
+#!/bin/bash
+# Shell script for handling hibernation in multiple OSs
+# having one shared swap space.
+#
+# Read me:
+#  ii) This script has been tested on Ubuntu 12.04 LTS.
+# iii) You will require uswsusp for using this script.
+# iii) This is an experimental work. Please use it at your own
+#      risk.
+#  iv) Usage:
+#		Run:
+#			$ hibernate-v2.0
+#		During the intial setup it will take some time and
+#		the system will reboot after the configuration. Please
+#		save your work before executing this script.
+#
+# @author: Ashwin Jha  <ajha.dev@gmail.com>
+#          Arindam Pal <palarindam1991@gmail.com>
+
+SWAP_FILE=/swapfile.$(uname -r)
+DEVICE=$(df / | awk '/^\/dev/ {print $1}')
+RAM_SIZE=1024
+
+create_swap() {
+	dd if=/dev/zero of=${SWAP_FILE} bs=1M count=${RAM_SIZE}
+	chmod 600 ${SWAP_FILE}
+	mkswap ${SWAP_FILE}
+}
+
+add_swap() {
+	echo "#---------Hibernating swap---------"
+	echo "# DO NOT REMOVE THIS SWAP FILE." >> /etc/fstab
+	echo "${SWAP_FILE} none swap swap 0 0">> /etc/fstab
+	swapon ${SWAP_FILE}
+}
+
+configure_uswsusp() {
+	sed -i '/resume device/d' /etc/uswsusp.conf
+	sed -i '/resume offset/d' /etc/uswsusp.conf
+	echo "resume device = ${DEVICE}" >> /etc/uswsusp.conf
+	SWAP_OFFSET=$(swap-offset ${SWAP_FILE})
+	echo "${SWAP_OFFSET}" >> /etc/uswsusp.conf
+}
+
+__main() {
+	if [![`dpkg -s uswsusp`]]; then
+		echo "Dependency not satisfied: uswsusp"
+		echo "Please use \"sudo apt-get install uswsusp\" to install"
+		exit 1
+	fi
+	if [ -f "$SWAP_FILE" ]; then
+		echo "Swap file already present."
+	else
+		echo "First time execution. System will reboot after configuration."
+		echo "Please save your work and press any key to continue."
+		read
+		echo "Swap file needs to be created."
+		echo "Creating swap file......."
+		create_swap
+		echo "Swap file created."
+		echo "Adding hibernating swap entry........"
+		add_swap
+		echo "Swap added."
+		echo "Configuring uswsusp......"
+		configure_uswsusp
+		echo "uswsusp configured."
+		echo "Updating initramfs......."
+		update-initramfs -u
+		echo "initramfs updated."
+		reboot
+	fi
+	echo "Calling s2disk........"
+	s2disk
+}
+
+if [ $(id -u) != 0 ]; then
+	echo "Please run as superuser" 1>&2
+	exit 1
+fi
+__main
